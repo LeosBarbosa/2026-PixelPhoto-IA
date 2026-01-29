@@ -1,0 +1,181 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+*/
+
+import React, { useMemo, useState } from 'react';
+import { useEditor } from '../../../context/EditorContext';
+import TipBox from '../common/TipBox';
+import LazyIcon from '../LazyIcon';
+import Slider from '../common/Slider';
+
+// Função auxiliar para encontrar o maior divisor comum
+const gcd = (a: number, b: number): number => {
+    return b === 0 ? a : gcd(b, a % b);
+};
+
+const CropPanel: React.FC = () => {
+    const {
+        isLoading,
+        aspect,
+        setAspect,
+        handleApplyCrop,
+        handleTransform,
+        completedCrop,
+    } = useEditor();
+
+    const [customRatio, setCustomRatio] = useState({ width: 16, height: 9 });
+    const [isCustomActive, setIsCustomActive] = useState(false);
+
+    const aspectRatios = [
+        { name: 'Livre', value: undefined, icon: 'CropIcon' },
+        { name: '1:1', value: 1 / 1, icon: 'AspectRatioSquareIcon' },
+        { name: '4:3', value: 4 / 3, icon: 'AspectRatioLandscapeIcon' },
+        { name: '16:9', value: 16 / 9, icon: 'AspectRatioLandscapeIcon' },
+        { name: '3:4', value: 3 / 4, icon: 'AspectRatioPortraitIcon' },
+        { name: '9:16', value: 9 / 16, icon: 'AspectRatioPortraitIcon' },
+    ];
+
+    const transforms = [
+        { name: 'Girar Esquerda', type: 'rotate-left' as const, icon: 'RotateLeftIcon' },
+        { name: 'Girar Direita', type: 'rotate-right' as const, icon: 'RotateRightIcon' },
+        { name: 'Inverter H.', type: 'flip-h' as const, icon: 'FlipHorizontalIcon' },
+        { name: 'Inverter V.', type: 'flip-v' as const, icon: 'FlipVerticalIcon' },
+    ];
+
+    const handlePredefinedClick = (value: number | undefined) => {
+        setIsCustomActive(false);
+        setAspect(value);
+    };
+
+    const handleCustomWidthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newWidth = parseInt(e.target.value, 10);
+        if (newWidth > 0) {
+            const newRatio = { ...customRatio, width: newWidth };
+            setCustomRatio(newRatio);
+            setAspect(newRatio.width / newRatio.height);
+            if (!isCustomActive) setIsCustomActive(true);
+        }
+    };
+    
+    const handleCustomHeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newHeight = parseInt(e.target.value, 10);
+        if (newHeight > 0) {
+            const newRatio = { ...customRatio, height: newHeight };
+            setCustomRatio(newRatio);
+            setAspect(newRatio.width / newRatio.height);
+            if (!isCustomActive) setIsCustomActive(true);
+        }
+    };
+
+    const { width, height, ratio } = useMemo(() => {
+        if (!completedCrop?.width || !completedCrop?.height) {
+            return { width: '---', height: '---', ratio: '---' };
+        }
+        const w = Math.round(completedCrop.width);
+        const h = Math.round(completedCrop.height);
+        
+        if (w === 0 || h === 0) {
+            return { width: '0', height: '0', ratio: '---' };
+        }
+
+        const commonDivisor = gcd(w, h);
+        const ratioStr = `${w / commonDivisor}:${h / commonDivisor}`;
+        return { width: w.toString(), height: h.toString(), ratio: ratioStr };
+    }, [completedCrop]);
+
+    return (
+        <div className="w-full flex flex-col gap-6 animate-fade-in">
+            <div className="bg-gray-900/30 p-4 rounded-lg border border-gray-700/50">
+                <h3 className="font-bold text-white text-md mb-3 text-center">Proporção</h3>
+                <div className="grid grid-cols-3 gap-2">
+                    {aspectRatios.map(({ name, value, icon }) => (
+                        <button
+                            key={name}
+                            onClick={() => handlePredefinedClick(value)}
+                            disabled={isLoading}
+                            className={`p-2 rounded-md text-sm font-semibold transition-all duration-200 aspect-square flex flex-col items-center justify-center gap-1 ${!isCustomActive && aspect === value ? 'bg-blue-600 text-white shadow-md' : 'bg-gray-800/50 hover:bg-gray-700/50 text-gray-300'}`}
+                            title={name}
+                        >
+                            <LazyIcon name={icon} className="w-6 h-6" />
+                            <span className="text-xs">{name}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className={`bg-gray-900/30 p-4 rounded-lg border transition-all ${isCustomActive ? 'border-blue-500' : 'border-gray-700/50'}`}>
+                <h3 className="font-bold text-white text-md mb-3 text-center">Proporção Personalizada</h3>
+                <div className="space-y-4">
+                    <Slider
+                        label="Largura"
+                        value={customRatio.width}
+                        min={1} max={21}
+                        onChange={handleCustomWidthChange}
+                        disabled={isLoading}
+                        tooltip="Define a parte da largura da proporção personalizada."
+                    />
+                    <Slider
+                        label="Altura"
+                        value={customRatio.height}
+                        min={1} max={21}
+                        onChange={handleCustomHeightChange}
+                        disabled={isLoading}
+                        tooltip="Define a parte da altura da proporção personalizada."
+                    />
+                </div>
+            </div>
+
+            <div className="bg-gray-900/30 p-4 rounded-lg border border-gray-700/50">
+                <h3 className="font-bold text-white text-md mb-3 text-center">Dimensões da Seleção</h3>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                    <div>
+                        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Largura</p>
+                        <p className="text-lg font-mono text-white mt-1">{width} px</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Altura</p>
+                        <p className="text-lg font-mono text-white mt-1">{height} px</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Proporção</p>
+                        <p className="text-lg font-mono text-white mt-1">{ratio}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-gray-900/30 p-4 rounded-lg border border-gray-700/50">
+                 <h3 className="font-bold text-white text-md mb-3 text-center">Transformar</h3>
+                <div className="grid grid-cols-4 gap-2">
+                    {transforms.map(({ name, type, icon }) => (
+                         <button 
+                            key={type} 
+                            onClick={() => handleTransform(type)} 
+                            disabled={isLoading} 
+                            className="p-2 rounded-md text-sm font-semibold transition-all duration-200 aspect-square flex flex-col items-center justify-center gap-1 bg-gray-800/50 hover:bg-gray-700/50 text-gray-300"
+                            title={name}
+                        >
+                            <LazyIcon name={icon} className="w-6 h-6" />
+                            <span className="text-xs">{name}</span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <TipBox>
+                Selecione uma proporção predefinida ou use os controles deslizantes para criar uma proporção personalizada para o seu corte.
+            </TipBox>
+
+            <button
+                onClick={handleApplyCrop}
+                disabled={isLoading || !completedCrop?.width || !completedCrop?.height}
+                className="w-full mt-2 bg-gradient-to-br from-green-600 to-green-500 text-white font-bold py-3 px-6 rounded-lg transition-all flex items-center justify-center gap-2 disabled:from-gray-600 disabled:shadow-none disabled:cursor-not-allowed active:scale-95"
+            >
+                <LazyIcon name="CropIcon" className={`w-5 h-5 ${isLoading ? 'animate-pulse' : ''}`} />
+                {isLoading ? 'Aplicando...' : 'Aplicar Corte'}
+            </button>
+        </div>
+    );
+};
+
+export default CropPanel;
