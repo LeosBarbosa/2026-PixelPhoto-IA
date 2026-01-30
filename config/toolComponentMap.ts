@@ -36,16 +36,16 @@ export const toolComponentMap: Partial<Record<ToolId, React.LazyExoticComponent<
     localAdjust: React.lazy(() => import('./components/tools/LocalAdjustmentPanel')),
     magicMontage: React.lazy(() => import('./components/tools/MagicMontagePanel')),
     objectRemover: React.lazy(() => import('./components/tools/ObjectRemoverPanel')),
-    // FIX: Changed import path to PascalCase 'RemoveBgPanel' to resolve casing conflict.
-    removeBg: React.lazy(() => import('./components/tools/RemoveBgPanel')),
+    // FIX: Use lowercase import to match file name and avoid casing conflicts with already included file
+    removeBg: React.lazy(() => import('./components/tools/removebgpanel')),
     faceSwap: React.lazy(() => import('./components/tools/FaceSwapPanel')),
     generativeEdit: React.lazy(() => import('./components/tools/GenerativeEditPanel')),
     aiTextEdit: React.lazy(() => import('./components/tools/AITextEditPanel')),
     text: React.lazy(() => import('./components/tools/TextPanel')),
     textEffects: React.lazy(() => import('./components/tools/TextEffectsPanel')),
     photoRestoration: React.lazy(() => import('./components/tools/ImageRestorePanel')),
-    // FIX: Changed import path to PascalCase 'UpscalePanel' to resolve casing conflict.
-    upscale: React.lazy(() => import('./components/tools/UpscalePanel')),
+    // FIX: Use lowercase import to match file name and avoid casing conflicts with already included file
+    upscale: React.lazy(() => import('./components/tools/upscalepanel')),
     superResolution: React.lazy(() => import('./components/tools/SuperResolutionPanel')),
     unblur: React.lazy(() => import('./components/tools/UnblurPanel')),
     sharpen: React.lazy(() => import('./components/tools/SharpenPanel')),

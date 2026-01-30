@@ -1,10 +1,11 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
 import React, { useState, useEffect } from 'react';
 import { type ToolId } from '../../../../types';
-import PromptEnhancer from './PromptEnhancer';
+import PromptEnhancer from '../tools/common/PromptEnhancer';
 import { usePromptSuggestions } from '../../../../hooks/usePromptSuggestions';
 import PromptSuggestionsDropdown from '../../common/PromptSuggestionsDropdown';
 import LazyIcon from '../../LazyIcon';

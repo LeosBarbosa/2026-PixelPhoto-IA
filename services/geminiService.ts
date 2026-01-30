@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -9,6 +10,11 @@ import * as db from '../utils/db';
 import { sha256 } from '../utils/cryptoUtils';
 import { orchestrate as orchestrateTool } from "./orchestrator";
 import { type SmartSearchResult, type ToolId, type Toast, type VideoAspectRatio, type DetectedObject } from "../types";
+
+// --- CONFIGURATION ---
+// Set this to true when your backend (api/gemini.ts) is deployed and accessible.
+const USE_BACKEND_PROXY = false;
+const PROXY_ENDPOINT = '/api/gemini';
 
 // Helper function to show a toast message
 const showToast = (setToast: (toast: Toast | null) => void, message: string, type: Toast['type'] = 'info') => {
@@ -74,8 +80,67 @@ const handleGeminiError = (error: unknown): string => {
 };
 
 
-// Initialize the Gemini client
+// Initialize the Gemini client (used only when USE_BACKEND_PROXY is false or for operations not supported by proxy)
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY! });
+
+/**
+ * Core function to route requests either to the local SDK or the backend proxy.
+ */
+const executeGeminiRequest = async (params: {
+    model: string;
+    contents?: any; // For generateContent
+    prompt?: string; // For generateImages
+    config?: any;
+    task?: 'generateContent' | 'generateImages';
+}) => {
+    const { model, contents, prompt, config, task = 'generateContent' } = params;
+
+    if (USE_BACKEND_PROXY) {
+        try {
+            const response = await fetch(PROXY_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model,
+                    contents,
+                    prompt,
+                    config,
+                    task
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `Backend error: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error("Proxy Request Failed:", error);
+            throw error;
+        }
+    } else {
+        // Direct SDK usage
+        const ai = getAI();
+        if (task === 'generateImages') {
+             // For Imagen
+             return await ai.models.generateImages({
+                 model,
+                 prompt: prompt!,
+                 config
+             });
+        } else {
+             // For Gemini
+             return await ai.models.generateContent({
+                 model,
+                 contents,
+                 config
+             });
+        }
+    }
+}
 
 // --- Helper Functions ---
 
@@ -136,11 +201,11 @@ export const generateImageWithGemini = async (
   }
 
   try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model,
-      contents,
-      config,
+    const response = await executeGeminiRequest({
+        model,
+        contents,
+        config,
+        task: 'generateContent'
     });
 
     // FIX: Add robust error handling for blocked prompts and empty candidates.
@@ -176,15 +241,18 @@ export const generateImageWithGemini = async (
     
     // 4. If no image is found, check for a specific finish reason like SAFETY.
     if (candidate.finishReason === 'SAFETY') {
-      const blockedRating = candidate.safetyRatings?.find(r => r.blocked);
+      const blockedRating = candidate.safetyRatings?.find((r: any) => r.blocked);
       const reason = blockedRating ? `Conteúdo bloqueado: ${blockedRating.category}.` : 'A resposta foi bloqueada por razões de segurança.';
       throw new Error(reason);
     }
 
     // 5. If there's still no image, check if the model returned text instead.
-    const textResponse = response.text;
-    if (textResponse) {
-        throw new Error(`A API retornou uma mensagem de texto em vez de uma imagem: "${textResponse}"`);
+    const textResponse = response.text; // The SDK getter might not be available on raw JSON, handle access carefully
+    // If using proxy, response is a plain object, we need to extract text manually if the getter isn't there
+    const extractedText = typeof response.text === 'string' ? response.text : candidate.content?.parts?.[0]?.text;
+    
+    if (extractedText) {
+        throw new Error(`A API retornou uma mensagem de texto em vez de uma imagem: "${extractedText}"`);
     }
 
     // 6. Final fallback if the candidate exists but contains no usable content.
@@ -203,17 +271,27 @@ export const generateImageWithGemini = async (
 
 export const analyzeImage = async (imageFile: File, question: string, setToast: (toast: Toast | null) => void): Promise<string | undefined> => {
   try {
-    const ai = getAI();
     const imagePart = await fileToPart(imageFile);
     const textPart = { text: question };
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-pro', // A good model for multimodal tasks
+    
+    const response = await executeGeminiRequest({
+      model: 'gemini-2.5-pro',
       contents: { parts: [imagePart, textPart] },
       config: {
         thinkingConfig: { thinkingBudget: 32768 },
       },
+      task: 'generateContent'
     });
-    return response.text;
+
+    // Handle SDK response object or Proxy plain object
+    if (response.text && typeof response.text === 'function') {
+        return response.text();
+    } else if (typeof response.text === 'string') {
+        return response.text;
+    } else {
+        return response.candidates?.[0]?.content?.parts?.[0]?.text;
+    }
+
   } catch (error) {
     console.error("Erro na análise da imagem:", error);
     const userFriendlyError = handleGeminiError(error);
@@ -234,14 +312,14 @@ export const generateImageFromText = async (prompt: string, aspectRatio: string,
     }
 
     try {
-        const ai = getAI();
-        const response = await ai.models.generateImages({
+        const response = await executeGeminiRequest({
             model: 'imagen-4.0-generate-001',
             prompt: prompt,
             config: {
               numberOfImages: 1,
               aspectRatio: aspectRatio as any,
             },
+            task: 'generateImages'
         });
 
         const base64ImageBytes = response.generatedImages[0].image.imageBytes;
@@ -279,8 +357,8 @@ export const validatePromptSpecificity = async (prompt: string, toolName: string
   const validationPrompt = `Analise o seguinte prompt de usuário para uma ferramenta de IA chamada "${toolName}": "${prompt}". O prompt é específico o suficiente para gerar um resultado de alta qualidade? Responda com um objeto JSON com duas chaves: "isSpecific" (um booleano) e "suggestion" (uma string em português que sugere como melhorar o prompt se ele não for específico, ou uma mensagem de confirmação se for).`;
 
   try {
-    const ai = getAI();
-    const response: GenerateContentResponse = await ai.models.generateContent({
+    // Validation is quick, can use proxy or direct
+    const response = await executeGeminiRequest({
         model: 'gemini-2.5-flash',
         contents: validationPrompt,
         config: {
@@ -288,8 +366,16 @@ export const validatePromptSpecificity = async (prompt: string, toolName: string
         }
     });
     
-    const jsonText = response.text.trim();
-    const result = JSON.parse(jsonText);
+    let jsonText;
+    if (typeof response.text === 'function') {
+        jsonText = response.text();
+    } else if (typeof response.text === 'string') {
+        jsonText = response.text;
+    } else {
+        jsonText = response.candidates?.[0]?.content?.parts?.[0]?.text;
+    }
+
+    const result = JSON.parse(jsonText.trim());
     return {
         isSpecific: result.isSpecific ?? false,
         suggestion: result.suggestion ?? "Não foi possível validar o prompt."
@@ -397,13 +483,30 @@ export const applyStyleToImage = async (imageFile: File, prompt: string, setToas
 };
 
 export const detectObjects = async (imageFile: File, prompt?: string): Promise<DetectedObject[]> => {
-    const ai = getAI();
+    // NOTE: detectObjects returns structured data, so using the proxy requires careful JSON parsing of the response text
+    // if not natively handled. For simplicity, we keep it direct via SDK or wrapped via proxy if response structure matches.
     const imagePart = await fileToPart(imageFile);
     const textPart = { text: `Detecte os seguintes objetos na imagem: ${prompt || 'todos os objetos principais'}. Para cada objeto, forneça um 'label' (rótulo em português) e uma 'box' (caixa delimitadora com coordenadas normalizadas x_min, y_min, x_max, y_max). Retorne um array de objetos JSON.` };
-    const response = await ai.models.generateContent({ model: 'gemini-2.5-pro', contents: { parts: [imagePart, textPart] }, config: { responseMimeType: 'application/json' } });
+    
+    const response = await executeGeminiRequest({
+        model: 'gemini-2.5-pro',
+        contents: { parts: [imagePart, textPart] },
+        config: { responseMimeType: 'application/json' },
+        task: 'generateContent'
+    });
     
     try {
-        const result = JSON.parse(response.text);
+        // Handle potential differences in response structure between SDK and Proxy
+        let jsonText;
+        if (typeof response.text === 'function') {
+            jsonText = response.text();
+        } else if (typeof response.text === 'string') {
+            jsonText = response.text;
+        } else {
+            jsonText = response.candidates?.[0]?.content?.parts?.[0]?.text;
+        }
+
+        const result = JSON.parse(jsonText);
         if (Array.isArray(result)) {
             // Filter out any objects that don't have a valid 'box' property with all coordinates
             const validObjects = result.filter(obj => 
@@ -418,7 +521,7 @@ export const detectObjects = async (imageFile: File, prompt?: string): Promise<D
             return validObjects;
         }
     } catch (e) {
-        console.error("Failed to parse Gemini response for object detection:", e, "Response text:", response.text);
+        console.error("Failed to parse Gemini response for object detection:", e);
         return []; // Return empty array on parsing error
     }
     
@@ -500,6 +603,8 @@ Uma única imagem fotorrealista de alta qualidade com a troca de identidade conc
 };
 
 export const generateVideo = async (imageFile: File, prompt: string, aspectRatio: VideoAspectRatio, setToast: (toast: Toast | null) => void, setLoadingMessage: (message: string | null) => void): Promise<string> => {
+    // NOTE: generateVideos operations are complex (polling) and usually require client-side handling or a more sophisticated backend.
+    // For now, we keep this using the direct SDK to avoid complexity in the proxy.
     const ai = getAI();
     let operation;
     try {
@@ -593,11 +698,16 @@ export const generateDoubleExposure = async (portraitFile: File, landscapeFile: 
 };
 
 export const getSceneryDescription = async (sceneryPrompt: string, setToast: (toast: Toast | null) => void): Promise<string> => {
-    const ai = getAI();
-    const prompt = `O usuário quer colocar um objeto em um cenário. O prompt dele é: "${sceneryPrompt}". Transforme o prompt do usuário em uma descrição de cenário rica e detalhada para um gerador de imagens. Retorne apenas a descrição do cenário.`;
+    // This is text-only generation, candidate for proxy
     try {
-        const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
-        return response.text;
+        const response = await executeGeminiRequest({
+            model: 'gemini-2.5-flash',
+            contents: `O usuário quer colocar um objeto em um cenário. O prompt dele é: "${sceneryPrompt}". Transforme o prompt do usuário em uma descrição de cenário rica e detalhada para um gerador de imagens. Retorne apenas a descrição do cenário.`,
+            task: 'generateContent'
+        });
+        
+        if (typeof response.text === 'string') return response.text;
+        return response.candidates?.[0]?.content?.parts?.[0]?.text || '';
     } catch(error) {
         showToast(setToast, handleGeminiError(error), 'error');
         throw error;

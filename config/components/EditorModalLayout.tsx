@@ -1,3 +1,4 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -53,7 +54,9 @@ const EditorModalLayout: React.FC = () => {
     };
     
     const handleTouchEnd = (e: React.TouchEvent) => {
-        if (isPanModeActive || !touchStartRef.current) return;
+        if (isPanModeActive) return;
+        // Explicitly check if touchStartRef.current is null to avoid "reading 'x' of null" error
+        if (!touchStartRef.current) return;
     
         const touchEnd = e.changedTouches[0];
         const deltaX = touchEnd.clientX - touchStartRef.current.x;
